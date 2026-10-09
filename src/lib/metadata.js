@@ -22,27 +22,44 @@ async function readEpubMeta(file) {
     author: meta.creator,
     synopsis: stripHtml(meta.description),
     published: meta.pubdate ? meta.pubdate.slice(0, 10) : "",
-    pages: 0, // EPUBs have no real pages; the reader estimates this later
+    pages: 0,
     cover,
   };
 }
 
 async function readPdfMeta(file) {
-  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
-    .promise;
-  const info = (await pdf.getMetadata()).info || {};
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 0.8 });
-  const canvas = document.createElement("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  await page.render({ canvasContext: canvas.getContext("2d"), viewport })
-    .promise;
-  const cover = await new Promise((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", 0.8),
-  );
+  // The loading task owns the cleanup, so keep it in a variable
+  const task = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
+  const pdf = await task.promise;
+  let info = {};
+  let cover = null;
+
+  try {
+    info = (await pdf.getMetadata()).info || {};
+  } catch (e) {
+    console.warn("Could not read PDF metadata", e);
+  }
+
+  try {
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 0.8 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({
+      canvas,
+      canvasContext: canvas.getContext("2d"),
+      viewport,
+    }).promise;
+    cover = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.8),
+    );
+  } catch (e) {
+    console.warn("Could not render the cover", e);
+  }
+
   const pages = pdf.numPages;
-  pdf.destroy();
+  task.destroy();
   return { title: info.Title, author: info.Author, pages, cover };
 }
 

@@ -50,31 +50,32 @@ export default function PdfReader({ book, startAt }) {
 
   // Load the PDF
   useEffect(() => {
-    let doc;
+    let task;
     let cancelled = false;
     (async () => {
-      doc = await pdfjsLib.getDocument({ data: await book.file.arrayBuffer() })
-        .promise;
-      if (cancelled) {
-        doc.destroy();
-        return;
+      try {
+        task = pdfjsLib.getDocument({ data: await book.file.arrayBuffer() });
+        const doc = await task.promise;
+        if (cancelled) return;
+        setPdf(doc);
+        const outline = await doc.getOutline();
+        const items = outline ? await flattenOutline(doc, outline) : [];
+        // No outline in this PDF? Fall back to a plain list of pages
+        setToc(
+          items.length
+            ? items
+            : Array.from({ length: doc.numPages }, (_, i) => ({
+                label: `Page ${i + 1}`,
+                target: i + 1,
+              })),
+        );
+      } catch (e) {
+        if (!cancelled) console.error("Could not open PDF", e);
       }
-      setPdf(doc);
-      const outline = await doc.getOutline();
-      const items = outline ? await flattenOutline(doc, outline) : [];
-      // No outline in this PDF? Fall back to a plain list of pages
-      setToc(
-        items.length
-          ? items
-          : Array.from({ length: doc.numPages }, (_, i) => ({
-              label: `Page ${i + 1}`,
-              target: i + 1,
-            })),
-      );
     })();
     return () => {
       cancelled = true;
-      if (doc) doc.destroy();
+      if (task) task.destroy();
     };
   }, [book.id]);
 

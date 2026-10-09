@@ -14,3 +14,10 @@ createRoot(document.getElementById("root")).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+if (import.meta.env.DEV) {
+  import("./lib/seed").then((m) => {
+    window.seedSessions = m.seedSessions;
+    window.clearSessions = m.clearSessions;
+  });
+}

@@ -12,12 +12,12 @@ export default function BookDetailPanel({ book, percent, onDeleted }) {
   const pct = Math.round(percent * 100);
 
   return (
-    <aside className="relative w-[420px] shrink-0 overflow-hidden border-l border-line">
+    <aside className="relative w-[520px] shrink-0 overflow-hidden border-1 border-line">
       {cover && (
         <img
           src={cover}
           alt=""
-          className="absolute inset-0 h-full w-full scale-125 object-cover opacity-30 blur-2xl"
+          className="absolute inset-0 h-full w-full scale-125 object-cover opacity-30 blur"
         />
       )}
       <div className="relative flex h-full flex-col gap-4 overflow-y-auto bg-black/40 p-6">

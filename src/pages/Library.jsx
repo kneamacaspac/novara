@@ -85,7 +85,7 @@ export default function Library() {
 
         <button
           onClick={() => setAdding(true)}
-          className={`fixed bottom-8 grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-xl ${selected ? "right-[450px]" : "right-8"}`}
+          className={`fixed bottom-8 grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-xl ${selected ? "right-[550px]" : "right-8"}`}
         >
           <Plus />
         </button>

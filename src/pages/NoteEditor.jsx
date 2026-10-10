@@ -1,25 +1,47 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  Settings as Cog,
+  Pencil,
+  Palette,
+  BookOpen,
+  FolderMinus,
+} from "lucide-react";
 import { db } from "../db";
-import { addNote, saveNote, deleteNote } from "../services/noteService";
+import {
+  addNote,
+  saveNote,
+  updateNoteMeta,
+  deleteNote,
+} from "../services/noteService";
+import {
+  moveBookmark,
+  updateBookmark,
+  deleteBookmark,
+} from "../services/bookmarkService";
+import { tintStyle } from "../lib/ui";
+import ContextMenu, { useContextMenu } from "../components/ContextMenu";
+import FolderSettingsModal from "../components/FolderSettingsModal";
+import ItemSettingsModal from "../components/ItemSettingsModal";
 
 export default function NoteEditor() {
   const nav = useNavigate();
+  const ctx = useContextMenu();
   const fid = Number(useParams().folderId);
   const [params, setParams] = useSearchParams();
   const noteId = Number(params.get("note")) || null;
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [modal, setModal] = useState(null); // { type: 'folder' | 'note' | 'bookmark', item }
 
   const data = useLiveQuery(
     async () => ({
       folder: await db.folders.get(fid),
-      notes: (
-        await db.notes.where("folderId").equals(fid).sortBy("updatedAt")
-      ).reverse(),
+      notes: await db.notes.where("folderId").equals(fid).toArray(),
       bookmarks: await db.bookmarks.where("folderId").equals(fid).toArray(),
       books: await db.books.toArray(),
     }),
@@ -37,11 +59,28 @@ export default function NoteEditor() {
     );
   }, [noteId, loaded]);
 
-  if (!data) return null;
+  // If this folder was deleted (from the settings window), go back to the Notebook
+  useEffect(() => {
+    if (data && !data.folder) nav("/notebook");
+  }, [data]);
+
+  if (!data || !data.folder) return null;
   const { folder, notes, bookmarks, books } = data;
+  const folderColor = folder.color || "#7c6cff";
+
   const bookTitle = (id) =>
     (books.find((b) => b.id === id) || {}).title || "Unknown book";
   const has = (s) => (s || "").toLowerCase().includes(q.toLowerCase());
+  const bmDefault = (b) =>
+    `${bookTitle(b.bookId)} | ${b.page ? "pg " + b.page : Math.round(b.percent * 100) + "%"}`;
+  const bmName = (b) => b.name || bmDefault(b);
+
+  // Sort order chosen in the folder settings
+  const sorted = [...notes].sort((a, b) => {
+    if (folder.sort === "title") return a.title.localeCompare(b.title);
+    if (folder.sort === "oldest") return a.updatedAt - b.updatedAt;
+    return b.updatedAt - a.updatedAt;
+  });
 
   async function create() {
     const id = await addNote({ folderId: fid });
@@ -58,11 +97,53 @@ export default function NoteEditor() {
     setTimeout(() => setSaved(false), 1500);
   }
 
-  async function remove(id) {
-    if (!confirm("Delete this note?")) return;
-    await deleteNote(id);
-    if (id === noteId) setParams({});
+  async function removeNote(n) {
+    if (!confirm(`Delete "${n.title}"?`)) return;
+    await deleteNote(n.id);
+    if (n.id === noteId) setParams({});
   }
+  async function removeBookmark(b) {
+    if (confirm("Delete this bookmark?")) await deleteBookmark(b.id);
+  }
+
+  const noteMenu = (n) => [
+    { label: "Open", icon: Pencil, onClick: () => setParams({ note: n.id }) },
+    {
+      label: "Customize",
+      icon: Palette,
+      onClick: () => setModal({ type: "note", item: n }),
+    },
+    {
+      label: "Delete note",
+      icon: Trash2,
+      danger: true,
+      onClick: () => removeNote(n),
+    },
+  ];
+  const bookmarkMenu = (b) => [
+    {
+      label: "Open in reader",
+      icon: BookOpen,
+      onClick: () =>
+        nav(`/read/${b.bookId}?at=${encodeURIComponent(b.location)}`),
+    },
+    {
+      label: "Customize",
+      icon: Palette,
+      onClick: () => setModal({ type: "bookmark", item: b }),
+    },
+    {
+      label: "Remove from folder",
+      icon: FolderMinus,
+      onClick: () => moveBookmark(b.id, null),
+    },
+    {
+      label: "Delete bookmark",
+      icon: Trash2,
+      danger: true,
+      onClick: () => removeBookmark(b),
+    },
+  ];
 
   const field =
     "w-full rounded-lg border border-line bg-panel2 px-3 py-2 outline-none focus:border-accent";
@@ -76,9 +157,18 @@ export default function NoteEditor() {
         >
           <ArrowLeft size={18} />
         </button>
-        <h1 className="flex-1 text-2xl font-bold">
-          {folder ? folder.name : "Folder"}
-        </h1>
+        <span
+          className="h-4 w-4 shrink-0 rounded-full"
+          style={{ background: folderColor }}
+        />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-2xl font-bold">{folder.name}</h1>
+          {folder.description && (
+            <p className="truncate text-sm text-white/60">
+              {folder.description}
+            </p>
+          )}
+        </div>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -91,46 +181,58 @@ export default function NoteEditor() {
         >
           + New Note
         </button>
+        <button
+          onClick={() => setModal({ type: "folder", item: folder })}
+          className="rounded-lg bg-panel2 p-2 hover:bg-white/10"
+          title="Folder settings"
+        >
+          <Cog size={18} />
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1 gap-4">
         <div className="w-72 shrink-0 space-y-2 overflow-y-auto">
-          {notes
+          {sorted
             .filter((n) => has(n.title) || has(n.body))
             .map((n) => (
               <div
                 key={n.id}
                 className={`glass flex items-start p-3 ${n.id === noteId ? "ring-1 ring-accent" : ""}`}
+                style={tintStyle(n.color)}
+                onContextMenu={(e) => ctx.open(e, noteMenu(n))}
               >
                 <button
                   onClick={() => setParams({ note: n.id })}
-                  className="flex-1 text-left"
+                  className="min-w-0 flex-1 text-left"
                 >
-                  <div className="font-medium">{n.title}</div>
+                  <div className="truncate font-medium">{n.title}</div>
                   <div className="line-clamp-2 text-xs text-white/60">
                     {n.body}
                   </div>
                 </button>
                 <button
-                  onClick={() => remove(n.id)}
+                  onClick={() => removeNote(n)}
                   className="text-white/40 hover:text-red-400"
                 >
                   <Trash2 size={14} />
                 </button>
               </div>
             ))}
-          {bookmarks.map((b) => (
-            <button
-              key={b.id}
-              onClick={() =>
-                nav(`/read/${b.bookId}?at=${encodeURIComponent(b.location)}`)
-              }
-              className="glass block w-full p-3 text-left text-sm"
-            >
-              {bookTitle(b.bookId)} |{" "}
-              {b.page ? "pg " + b.page : Math.round(b.percent * 100) + "%"}
-            </button>
-          ))}
+          {bookmarks
+            .filter((b) => has(bmName(b)))
+            .map((b) => (
+              <button
+                key={b.id}
+                onClick={() =>
+                  nav(`/read/${b.bookId}?at=${encodeURIComponent(b.location)}`)
+                }
+                onContextMenu={(e) => ctx.open(e, bookmarkMenu(b))}
+                className="glass block w-full truncate p-3 text-left text-sm"
+                style={tintStyle(b.color)}
+              >
+                {bmName(b)}
+              </button>
+            ))}
         </div>
 
         <div className="glass flex min-w-0 flex-1 flex-col gap-3 p-4">
@@ -175,6 +277,59 @@ export default function NoteEditor() {
           )}
         </div>
       </div>
+
+      <ContextMenu menu={ctx.menu} onClose={ctx.close} />
+
+      {modal && modal.type === "folder" && (
+        <FolderSettingsModal
+          folder={modal.item}
+          noteCount={notes.length}
+          onClose={() => setModal(null)}
+          onDeleted={() => nav("/notebook")}
+        />
+      )}
+
+      {modal && modal.type === "note" && (
+        <ItemSettingsModal
+          heading="Customize note"
+          nameLabel="Note title"
+          initialName={modal.item.title}
+          initialColor={modal.item.color}
+          deleteLabel="Delete note"
+          deleteMessage={`Delete "${modal.item.title}"?`}
+          onSave={async ({ name, color }) => {
+            await updateNoteMeta(modal.item.id, {
+              title: name || "Untitled note",
+              color,
+            });
+            // keep the editor's title box in sync if this note is open
+            if (modal.item.id === noteId)
+              setDraft((d) => d && { ...d, title: name || "Untitled note" });
+          }}
+          onDelete={async () => {
+            await deleteNote(modal.item.id);
+            if (modal.item.id === noteId) setParams({});
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal && modal.type === "bookmark" && (
+        <ItemSettingsModal
+          heading="Customize bookmark"
+          nameLabel="Bookmark name"
+          namePlaceholder={bmDefault(modal.item)}
+          initialName={modal.item.name || ""}
+          initialColor={modal.item.color}
+          deleteLabel="Delete bookmark"
+          deleteMessage="Delete this bookmark?"
+          onSave={({ name, color }) =>
+            updateBookmark(modal.item.id, { name, color })
+          }
+          onDelete={() => deleteBookmark(modal.item.id)}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   );
 }

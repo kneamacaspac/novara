@@ -121,7 +121,7 @@ export default function ReaderShell({
                     onClick={() => onGoTo(b.location)}
                     className="flex-1 px-4 py-3 text-left text-sm"
                   >
-                    {b.label || `Bookmark ${b.id}`}
+                    {b.name || b.label || `Bookmark ${b.id}`}
                   </button>
                   <button
                     onClick={() => deleteBookmark(b.id)}
